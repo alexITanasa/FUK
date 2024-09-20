@@ -1,0 +1,170 @@
+# importare librarii
+import sys
+import io
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+from PIL import Image
+import pytesseract
+import pandas as pd
+import cv2
+import numpy as np
+import os
+
+#PULA aici bagi calea executabilului din edit env 
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+def preproceseaza_imagine(cale_imagine):
+    """
+    Preproceseaza imaginea pentru a imbunatati acuratetea OCR.
+    """
+    # Citim imaginea
+    imagine = cv2.imread(cale_imagine)
+    # Verificam daca imaginea a fost incarcata corect
+    if imagine is None:
+        print(f"Eroare: Nu s-a putut incarca imaginea de la calea '{cale_imagine}'")
+        return None
+    # Conversie la niveluri de gri
+    imagine_gri = cv2.cvtColor(imagine, cv2.COLOR_BGR2GRAY)
+    # Aplicam un prag pentru binarizare
+    _, imagine_thresh = cv2.threshold(imagine_gri, 150, 255, cv2.THRESH_BINARY)
+    return imagine_thresh
+
+def extrage_text_imagine(cale_imagine):
+    """
+    Extrage textul din imagine folosind pytesseract.
+    """
+    # Preproceseaza imaginea, nu are cale de exceptie e all in
+    imagine = preproceseaza_imagine(cale_imagine)
+    if imagine is None:
+        return ""
+    # Extrage textul
+    text = pytesseract.image_to_string(imagine, lang='ron')
+    return text
+
+def salveaza_in_excel(text, cale_excel):
+    """
+    Salveaza textul extras intr-un fisier Excel.
+    """
+    # Impartim textul in linii
+    linii = text.split('\n')
+    # Eliminam liniile goale
+    linii = [linie for linie in linii if linie.strip() != '']
+    # Verificam daca exista date de salvat
+    if not linii:
+        print("Nu s-au gasit date de salvat in fisierul Excel.")
+        return
+    # Cream un DataFrame
+    df = pd.DataFrame(linii, columns=['Date Extrase'])
+    # Salvam in fisierul Excel
+    try:
+        # Daca fisierul Excel exista deja, adaugam datele la sfarsit
+        if os.path.exists(cale_excel):
+            # Citim datele existente
+            df_existente = pd.read_excel(cale_excel)
+            # Combinam datele
+            df_total = pd.concat([df_existente, df], ignore_index=True)
+            # Salvam toate datele
+            df_total.to_excel(cale_excel, index=False)
+        else:
+            # Daca fisierul nu exista, il cream
+            df.to_excel(cale_excel, index=False)
+        print(f"Datele au fost extrase si salvate in '{cale_excel}'")
+    except Exception as e:
+        print(f"Eroare la salvarea in fisierul Excel: {e}")
+
+if __name__ == "__main__":
+    # Specifica calea catre imaginea sursa
+    cale_imagine = r'c:\Users\Alex\Downloads\factura.png'  # Inlocuieste cu calea ta
+    # Specifica calea unde va fi salvat fisierul Excel
+    cale_excel = r'c:\Users\Alex\Documents\output.xlsx'
+    
+    # Extragem textul din imagine
+    text_extras = extrage_text_imagine(cale_imagine)
+    # Salvam textul in fisierul Excel
+    salveaza_in_excel(text_extras, cale_excel)
+# importare librarii
+import sys
+import io
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+from PIL import Image
+import pytesseract
+import pandas as pd
+import cv2
+import numpy as np
+import os
+
+#PULA aici bagi calea executabilului din edit env 
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+def preproceseaza_imagine(cale_imagine):
+    """
+    Preproceseaza imaginea pentru a imbunatati acuratetea OCR.
+    """
+    # Citim imaginea
+    imagine = cv2.imread(cale_imagine)
+    # Verificam daca imaginea a fost incarcata corect
+    if imagine is None:
+        print(f"Eroare: Nu s-a putut incarca imaginea de la calea '{cale_imagine}'")
+        return None
+    # Conversie la niveluri de gri
+    imagine_gri = cv2.cvtColor(imagine, cv2.COLOR_BGR2GRAY)
+    # Aplicam un prag pentru binarizare
+    _, imagine_thresh = cv2.threshold(imagine_gri, 150, 255, cv2.THRESH_BINARY)
+    return imagine_thresh
+
+def extrage_text_imagine(cale_imagine):
+    """
+    Extrage textul din imagine folosind pytesseract.
+    """
+    # Preproceseaza imaginea, nu are cale de exceptie e all in
+    imagine = preproceseaza_imagine(cale_imagine)
+    if imagine is None:
+        return ""
+    # Extrage textul
+    text = pytesseract.image_to_string(imagine, lang='ron')
+    return text
+
+def salveaza_in_excel(text, cale_excel):
+    """
+    Salveaza textul extras intr-un fisier Excel.
+    """
+    # Impartim textul in linii
+    linii = text.split('\n')
+    # Eliminam liniile goale
+    linii = [linie for linie in linii if linie.strip() != '']
+    # Verificam daca exista date de salvat
+    if not linii:
+        print("Nu s-au gasit date de salvat in fisierul Excel.")
+        return
+    # Cream un DataFrame
+    df = pd.DataFrame(linii, columns=['Date Extrase'])
+    # Salvam in fisierul Excel
+    try:
+        # Daca fisierul Excel exista deja, adaugam datele la sfarsit
+        if os.path.exists(cale_excel):
+            # Citim datele existente
+            df_existente = pd.read_excel(cale_excel)
+            # Combinam datele
+            df_total = pd.concat([df_existente, df], ignore_index=True)
+            # Salvam toate datele
+            df_total.to_excel(cale_excel, index=False)
+        else:
+            # Daca fisierul nu exista, il cream
+            df.to_excel(cale_excel, index=False)
+        print(f"Datele au fost extrase si salvate in '{cale_excel}'")
+    except Exception as e:
+        print(f"Eroare la salvarea in fisierul Excel: {e}")
+
+if __name__ == "__main__":
+    # Specifica calea catre imaginea sursa
+    cale_imagine = r'c:\Users\Alex\Downloads\factura.png'  # Inlocuieste cu calea ta
+    # Specifica calea unde va fi salvat fisierul Excel
+    cale_excel = r'c:\Users\Alex\Documents\output.xlsx'
+    
+    # Extragem textul din imagine
+    text_extras = extrage_text_imagine(cale_imagine)
+    # Salvam textul in fisierul Excel
+    salveaza_in_excel(text_extras, cale_excel)
