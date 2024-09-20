@@ -1,0 +1,147 @@
+# Importare librării necesare
+import sys
+import io
+import os
+import re  # Pentru expresii regulate
+import cv2
+import numpy as np
+import pandas as pd
+import pytesseract
+import spacy  # Pentru NLP și NER
+
+# Configurarea ieșirii standard
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+# Specifică calea către executabilul Tesseract (modifică dacă este necesar)
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+# Încărcăm modelul de limbă română în spaCy
+nlp = spacy.load('ro_core_news_sm')
+
+def preproceseaza_imagine(cale_imagine):
+    """
+    Preprocesează imaginea pentru a îmbunătăți acuratețea OCR.
+    """
+    # Citim imaginea
+    imagine = cv2.imread(cale_imagine)
+    # Verificăm dacă imaginea a fost încărcată corect
+    if imagine is None:
+        print(f"Eroare: Nu s-a putut încărca imaginea de la calea '{cale_imagine}'")
+        return None
+    # Conversie la niveluri de gri
+    imagine_gri = cv2.cvtColor(imagine, cv2.COLOR_BGR2GRAY)
+    # Aplicăm un prag pentru binarizare
+    _, imagine_thresh = cv2.threshold(imagine_gri, 150, 255, cv2.THRESH_BINARY)
+    return imagine_thresh
+
+def extrage_text_imagine(cale_imagine):
+    """
+    Extrage textul din imagine folosind pytesseract.
+    """
+    # Preprocesează imaginea
+    imagine = preproceseaza_imagine(cale_imagine)
+    if imagine is None:
+        return ""
+    # Extragem textul
+    custom_config = r'--oem 3 --psm 6'
+    text = pytesseract.image_to_string(imagine, lang='ron', config=custom_config)
+    return text
+
+def extrage_informatii_specifice(text):
+    """
+    Procesează textul pentru a extrage numele companiei și suma totală.
+    """
+    # Inițializăm variabilele pentru stocarea informațiilor
+    nume_companie = ''
+    suma_totala = ''
+    
+    # Folosim spaCy pentru a analiza textul
+    doc = nlp(text)
+    
+    # Extragerea numelui companiei folosind NER
+    for ent in doc.ents:
+        if ent.label_ in ['ORG', 'COMPANY', 'INSTITUTION']:
+            nume_companie = ent.text.strip()
+            break  # Luăm prima entitate de tip organizație găsită
+    
+    # Dacă nu am găsit numele companiei, putem încerca alte metode
+    if not nume_companie:
+        # De exemplu, luăm prima linie cu litere mari
+        linii_text = text.split('\n')
+        for linie in linii_text:
+            if linie.isupper() and len(linie.strip()) > 2:
+                nume_companie = linie.strip()
+                break
+    
+    # Extragerea sumei totale folosind expresii regulate
+    # Căutăm toate sumele de bani din text
+    pattern_suma = re.compile(r'(\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d{2})?)')
+    sume_gasite = pattern_suma.findall(text)
+    
+    if sume_gasite:
+        # Convertim sumele găsite la float pentru a le compara
+        sume_numerice = []
+        for suma in sume_gasite:
+            suma_noua = suma.replace('.', '').replace(',', '.')
+            try:
+                sume_numerice.append(float(suma_noua))
+            except ValueError:
+                continue
+        if sume_numerice:
+            # Presupunem că suma totală este cea mai mare sumă găsită
+            suma_max = max(sume_numerice)
+            suma_totala = f"{suma_max:.2f}"
+    
+    return nume_companie, suma_totala
+
+def salveaza_in_excel(nume_companie, suma_totala, cale_excel):
+    """
+    Salvează informațiile specifice într-un fișier Excel.
+    """
+    # Creăm un DataFrame cu datele extrase
+    df = pd.DataFrame({
+        'Nume Companie': [nume_companie],
+        'Suma Totală': [suma_totala]
+    })
+
+    # Salvăm în fișierul Excel
+    try:
+        # Dacă fișierul Excel există deja, adăugăm datele la sfârșit
+        if os.path.exists(cale_excel):
+            # Citim datele existente
+            df_existente = pd.read_excel(cale_excel)
+            # Combinăm datele
+            df_total = pd.concat([df_existente, df], ignore_index=True)
+            # Salvăm toate datele
+            df_total.to_excel(cale_excel, index=False)
+        else:
+            # Dacă fișierul nu există, îl creăm
+            df.to_excel(cale_excel, index=False)
+        print(f"Datele au fost extrase și salvate în '{cale_excel}'")
+    except Exception as e:
+        print(f"Eroare la salvarea în fișierul Excel: {e}")
+
+if __name__ == "__main__":
+    # Specifică calea către imaginea sursă
+    cale_imagine = r'c:\Users\Alex\Downloads\factura.png'  # Înlocuiește cu calea ta
+    # Specifică calea unde va fi salvat fișierul Excel
+    cale_excel = r'c:\Users\Alex\Documents\output.xlsx'
+    
+    # Extragem textul din imagine
+    text_extras = extrage_text_imagine(cale_imagine)
+    
+    if text_extras:
+        # Extragem informațiile specifice
+        nume_companie, suma_totala = extrage_informatii_specifice(text_extras)
+    
+        # Verificăm dacă am reușit să extragem datele
+        if nume_companie and suma_totala:
+            print(f"Nume Companie: {nume_companie}")
+            print(f"Suma Totală: {suma_totala}")
+    
+            # Salvăm datele în fișierul Excel
+            salveaza_in_excel(nume_companie, suma_totala, cale_excel)
+        else:
+            print("Nu s-au putut extrage informațiile specifice.")
+    else:
+        print("Nu s-a putut extrage textul din imagine.")
