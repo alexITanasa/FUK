@@ -1,0 +1,189 @@
+# Importare librării necesare
+import sys
+import io
+import os
+import re
+import cv2
+import numpy as np
+import pandas as pd
+import pytesseract
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+import time
+
+# Configurarea ieșirii standard
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+# Specifică calea către executabilul Tesseract (modifică dacă este necesar)
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+def preproceseaza_imagine(cale_imagine):
+    """
+    Preprocesează imaginea pentru a îmbunătăți acuratețea OCR.
+    """
+    imagine = cv2.imread(cale_imagine)
+    if imagine is None:
+        print(f"Eroare: Nu s-a putut încărca imaginea de la calea '{cale_imagine}'")
+        return None
+    imagine_gri = cv2.cvtColor(imagine, cv2.COLOR_BGR2GRAY)
+    imagine_gri = cv2.GaussianBlur(imagine_gri, (5, 5), 0)
+    imagine_gri = cv2.adaptiveThreshold(imagine_gri, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    return imagine_gri
+
+def extrage_text_imagine(cale_imagine):
+    """
+    Extrage textul din imagine folosind pytesseract.
+    """
+    imagine = preproceseaza_imagine(cale_imagine)
+    if imagine is None:
+        return ""
+    custom_config = r'--oem 3 --psm 6'
+    text = pytesseract.image_to_string(imagine, lang='ron', config=custom_config)
+    return text
+
+def curata_cif(cif_extras):
+    """
+    Curăță CIF-ul eliminând potențiale caractere OCR greșite (O în loc de 0, I în loc de 1 etc.).
+    """
+    cif_extras = cif_extras.replace('O', '0').replace('I', '1').replace(' ', '')
+    return cif_extras
+
+def extrage_cif(text):
+    """
+    Extrage CIF-ul din text folosind expresii regulate și îl curăță de eventuale erori OCR.
+    CIF-ul poate avea formatul RO12345678 sau doar 12345678.
+    """
+    pattern_cif = re.compile(r'(RO?\d{5,10})|\b\d{5,10}\b')
+    cif_gasit = pattern_cif.search(text)
+    
+    if cif_gasit:
+        cif_curat = curata_cif(cif_gasit.group(0))
+        return cif_curat
+    return None
+
+def extrage_suma(text):
+    """
+    Extrage suma totală de bani din text folosind expresii regulate.
+    """
+    pattern_suma = re.compile(r'(\d{1,3}(?:\.\d{3})*,\d{2})')  # Caută numere în format românesc, ex. 1.234,56
+    sume_gasite = pattern_suma.findall(text)
+    
+    if sume_gasite:
+        return sume_gasite[-1]  # Returnează ultima sumă, care de obicei este suma totală
+    return None
+
+def cauta_firma_pe_listafirme(cif):
+    """
+    Automatizează căutarea unei firme pe listafirme.ro folosind Selenium.
+    """
+    # Configurăm WebDriver-ul pentru Chrome (folosind webdriver-manager pentru a descărca și gestiona driver-ul)
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Rulare în mod "headless" fără deschiderea unei ferestre de browser
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+    try:
+        # Accesăm site-ul listafirme.ro
+        driver.get("https://www.listafirme.ro/")
+
+        # Așteptăm puțin pentru a permite încărcarea paginii
+        time.sleep(3)
+
+        # Găsim câmpul de căutare folosind XPath și introducem CIF-ul
+        camp_cautare = driver.find_element(By.XPATH, '/html/body/div[1]/header/div[2]/div[2]/form/div/input')
+        camp_cautare.send_keys(cif)
+
+        # Apăsăm pe butonul de căutare folosind XPath
+        buton_cauta = driver.find_element(By.XPATH, '/html/body/div[1]/header/div[2]/div[2]/form/div/div/button[1]')
+        buton_cauta.click()
+
+        # Așteptăm să se încarce pagina cu rezultatele
+        time.sleep(5)
+
+        # Găsim numele firmei în rezultatele de căutare
+        nume_firma_element = driver.find_element(By.XPATH, '/html/body/div[1]/main/section/div/table/tbody/tr[2]/td[2]/a')
+        nume_firma = nume_firma_element.text
+
+        print(f"Numele firmei găsite pentru CIF {cif}: {nume_firma}")
+        return nume_firma
+
+    except Exception as e:
+        print(f"Eroare la căutarea firmei: {e}")
+        return None
+    finally:
+        # Închidem browser-ul
+        driver.quit()
+
+def extrage_informatii_specifice(cale_imagine):
+    """
+    Extrage CIF-ul, suma totală și numele firmei din imagine.
+    """
+    text = extrage_text_imagine(cale_imagine)
+    
+    # Extragerea CIF-ului din text
+    cif = extrage_cif(text)
+    suma_totala = extrage_suma(text)
+
+    if cif:
+        print(f"CIF găsit: {cif}")
+        # Verificăm firma pe listafirme.ro folosind Selenium
+        nume_firma = cauta_firma_pe_listafirme(cif)
+        if nume_firma:
+            print(f"Firma asociată CIF-ului {cif}: {nume_firma}")
+            return cif, nume_firma, suma_totala
+        else:
+            print(f"Firma cu CIF-ul {cif} nu a fost găsită.")
+            return cif, None, suma_totala
+    else:
+        print("Nu s-a găsit niciun CIF în imagine.")
+        return None, None, suma_totala
+
+def salveaza_in_excel(cif, nume_firma, suma_totala, cale_excel):
+    """
+    Salvează CIF-ul, numele firmei și suma totală într-un fișier Excel.
+    """
+    df = pd.DataFrame({
+        'CIF': [cif],
+        'Nume Firma': [nume_firma if nume_firma else 'Firma necunoscută'],
+        'Suma Totală': [suma_totala if suma_totala else 'Suma necunoscută']
+    })
+
+    try:
+        if os.path.exists(cale_excel):
+            df_existente = pd.read_excel(cale_excel)
+            df_total = pd.concat([df_existente, df], ignore_index=True)
+            df_total.to_excel(cale_excel, index=False)
+        else:
+            df.to_excel(cale_excel, index=False)
+        print(f"Datele au fost extrase și salvate în '{cale_excel}'")
+    except Exception as e:
+        print(f"Eroare la salvarea în fișierul Excel: {e}")
+
+if __name__ == "__main__":
+    # Specifică calea către imaginea sursă
+    cale_imagine = r'c:\Users\Alex\Downloads\factura.png'  # Înlocuiește cu calea ta
+    # Specifică calea unde va fi salvat fișierul Excel
+    cale_excel = r'c:\Users\Alex\Documents\output.xlsx'
+    
+    # Extragem informațiile din imagine
+    cif, nume_firma, suma_totala = extrage_informatii_specifice(cale_imagine)
+    
+    # Verificăm dacă am reușit să extragem datele
+    if cif:
+        print(f"CIF: {cif}")
+        if nume_firma:
+            print(f"Nume Firma: {nume_firma}")
+        else:
+            print("Firma nu a fost găsită.")
+        
+        if suma_totala:
+            print(f"Suma Totală: {suma_totala}")
+        else:
+            print("Nu s-a găsit nicio sumă totală în imagine.")
+        
+        # Salvăm datele în fișierul Excel
+        salveaza_in_excel(cif, nume_firma, suma_totala, cale_excel)
+    else:
+        print("Nu s-au putut extrage informațiile specifice.")
